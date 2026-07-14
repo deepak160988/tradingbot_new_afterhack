@@ -28,25 +28,23 @@ Redeploy after adding env vars (`vercel --prod` again) so they take effect.
 ## 3. Configure TradingView Alert
 
 - **Webhook URL**: `https://<your-project>.vercel.app/api/webhook?secret=mySecret123`
-- **Message** (JSON):
-  ```json
-  {
-    "ticker": "{{ticker}}",
-    "action": "BUY",
-    "price": "{{close}}",
-    "time": "{{time}}"
-  }
+- **Message** (plain text — no JSON needed):
   ```
+  {{ticker}} Alert: {{strategy.order.action}} at {{close}} on {{interval}} ({{time}})
+  ```
+  Whatever you type here (with TradingView's `{{placeholders}}` already substituted)
+  gets forwarded to Telegram exactly as-is. The bot auto-adds 🟢 if the text contains
+  "BUY" or 🔴 if it contains "SELL" (cosmetic only, safe to ignore/remove).
 
 ## 4. Test
 
 ```bash
 curl -X POST "https://<your-project>.vercel.app/api/webhook?secret=mySecret123" \
-  -H "Content-Type: application/json" \
-  -d '{"ticker":"NIFTY","action":"BUY","price":"24500","time":"2026-07-14T10:00:00Z"}'
+  -H "Content-Type: text/plain" \
+  --data-raw "NIFTY Alert: BUY at 24500 on 15 (2026-07-14T10:00:00Z)"
 ```
 
-You should see the formatted alert appear in your Telegram group within seconds.
+You should see that exact text appear in your Telegram group within seconds.
 
 ## Getting your Telegram Chat ID
 

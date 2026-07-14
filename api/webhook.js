@@ -1,10 +1,29 @@
 // api/webhook.js
 // TradingView -> Telegram relay, deployed as a Vercel Serverless Function
 //
+// This version forwards your TradingView alert message AS PLAIN TEXT —
+// whatever you type in the alert's "Message" box is sent to Telegram as-is,
+// with TradingView's {{placeholders}} already substituted by TradingView itself.
+//
 // ENV VARS (set in Vercel dashboard -> Settings -> Environment Variables):
 //   TELEGRAM_BOT_TOKEN   - from @BotFather
 //   TELEGRAM_CHAT_ID     - your group chat id (negative number, e.g. -1001234567890)
 //   WEBHOOK_SECRET       - a random string you choose, used to validate incoming requests
+
+export const config = {
+  api: {
+    bodyParser: false, // read the raw body ourselves so we don't care about Content-Type
+  },
+};
+
+// Reads the raw request body as a plain string, regardless of Content-Type.
+async function readRawBody(req) {
+  const chunks = [];
+  for await (const chunk of req) {
+    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
 
 export default async function handler(req, res) {
   try {
@@ -32,56 +51,38 @@ export default async function handler(req, res) {
       });
     }
 
-    // --- 3. Parse the incoming alert ---
-    // TradingView sends whatever you typed in the alert's "Message" box.
-    // It can be plain text or JSON, depending on how you configured the alert.
-    let payload = req.body;
+    // --- 3. Read the alert as raw text ---
+    let message = (await readRawBody(req)).trim();
 
-    if (typeof payload === 'string') {
-      try {
-        payload = JSON.parse(payload);
-      } catch {
-        payload = { text: payload };
-      }
+    if (!message) {
+      message = '⚠️ Empty alert received (no message body)';
     }
 
-    // Guard against null/undefined body entirely
-    if (!payload || typeof payload !== 'object') {
-      payload = { text: String(payload || 'Empty alert body') };
+    // Optional: prefix with an emoji if the text obviously says BUY or SELL.
+    // This is just cosmetic — remove this block if you don't want it.
+    const upper = message.toUpperCase();
+    if (upper.includes('BUY') && !upper.includes('SELL')) {
+      message = `🟢 ${message}`;
+    } else if (upper.includes('SELL') && !upper.includes('BUY')) {
+      message = `🔴 ${message}`;
     }
 
-    // --- 4. Build the Telegram message ---
-    const ticker = payload.ticker || payload.symbol || 'N/A';
-    const action = (payload.action || payload.side || '').toUpperCase();
-    const price = payload.price || payload.close || 'N/A';
-    const time = payload.time || new Date().toISOString();
-    const rawText = payload.text;
-
-    const emoji = action === 'BUY' ? '🟢' : action === 'SELL' ? '🔴' : '⚪';
-
-    const message = rawText
-      ? rawText
-      : `${emoji} *${ticker}* Alert\n` +
-        `Action: *${action || 'N/A'}*\n` +
-        `Price: \`${price}\`\n` +
-        `Time: ${time}`;
-
-    // --- 5. Check fetch is available (diagnostic for old Node runtimes) ---
+    // --- 4. Check fetch is available (diagnostic for old Node runtimes) ---
     if (typeof fetch !== 'function') {
       return res.status(500).json({
         error: 'Global fetch is not available in this runtime.',
-        hint: 'Set "engines": {"node": "20.x"} in package.json and redeploy.',
+        hint: 'Set "engines": {"node": "24.x"} in package.json and redeploy.',
       });
     }
 
-    // --- 6. Send to Telegram ---
+    // --- 5. Send to Telegram (plain text, no Markdown parsing so any
+    //         TradingView special characters like * or _ don't break formatting) ---
     const tgResponse = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chat_id: chatId,
         text: message,
-        parse_mode: 'Markdown',
       }),
     });
 
